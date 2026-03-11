@@ -88,8 +88,7 @@ html,body,[class*="css"],.stApp{
     radial-gradient(ellipse 60% 40% at 80% 110%,rgba(79,142,247,0.05) 0%,transparent 60%),
     var(--black)!important;
 }
-#MainMenu,footer,header,.stDeployButton{display:none!important;visibility:hidden!important;}
-
+#MainMenu,footer,.stDeployButton{display:none!important;visibility:hidden!important;}
 /* ── Sidebar ── */
 section[data-testid="stSidebar"]{
   background:var(--s0)!important;
