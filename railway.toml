@@ -1,0 +1,7 @@
+[deploy]
+startCommand = "streamlit run app.py --server.port=$PORT --server.address=0.0.0.0"
+```
+
+**Step 2** — Also make sure your `Procfile` looks exactly like this (no quotes):
+```
+web: streamlit run app.py --server.port=$PORT --server.address=0.0.0.0
