@@ -1,6 +1,4 @@
-"""
-Split Expenses page — group expenses, track who owes whom, settle up.
-"""
+"""Split Expenses page."""
 import streamlit as st
 import pandas as pd
 from datetime import date
@@ -10,39 +8,24 @@ from utils.db import (create_group, load_groups, add_member, load_members,
 from utils.ui import inr, inr2, div_label, page_hero
 
 def compute_balances(group_id):
-    """
-    For each group, compute net balance per member.
-    Positive = owed money, Negative = owes money.
-    Returns list of (from_person, to_person, amount) settlement pairs.
-    """
     expenses = load_split_expenses(group_id)
     if expenses.empty: return {}, []
-
     balances = {}
     members  = load_members(group_id)
     for m in members["name"].tolist():
         balances[m] = 0.0
-
     for _,exp in expenses.iterrows():
         if exp["settled"]: continue
         shares = load_shares(exp["id"])
         payer  = exp["paid_by"]
         total  = float(exp["amount"])
-
-        # Payer is credited the full amount
-        if payer in balances:
-            balances[payer] = balances.get(payer, 0) + total
-
-        # Each member is debited their share
+        if payer in balances: balances[payer] = balances.get(payer, 0) + total
         for _,s in shares.iterrows():
             m = s["member"]
             balances[m] = balances.get(m, 0) - float(s["share"])
-
-    # Compute minimal settlements
     creditors = sorted([(v,k) for k,v in balances.items() if v>0.01], reverse=True)
     debtors   = sorted([(v,k) for k,v in balances.items() if v<-0.01])
     settlements = []
-
     i,j = 0,0
     while i < len(creditors) and j < len(debtors):
         credit_amt, creditor = creditors[i]
@@ -53,21 +36,17 @@ def compute_balances(group_id):
         debtors[j]   = (debt_amt + amt, debtor)
         if creditors[i][0] < 0.01: i+=1
         if debtors[j][0]   > -0.01: j+=1
-
     return balances, settlements
 
-def render():
+def render(user_id):
     page_hero("Split Expenses","Track group expenses, see who owes whom, and settle up easily.")
+    groups = load_groups(user_id)
 
-    groups = load_groups()
-
-    # ── Create group ──────────────────────────────────────────────────────────
     with st.expander("➕ Create New Group", expanded=groups.empty):
         with st.form("new_group"):
             c1,c2 = st.columns([2,1])
             with c1: gname = st.text_input("Group Name", placeholder="e.g. Goa Trip, Flat Expenses…")
-            with c2:
-                members_raw = st.text_input("Members", placeholder="Alice, Bob, Charlie")
+            with c2: members_raw = st.text_input("Members", placeholder="Alice, Bob, Charlie")
             sub = st.form_submit_button("🚀  Create Group", use_container_width=True)
         if sub:
             if not gname.strip():
@@ -77,10 +56,9 @@ def render():
                 if len(members) < 2:
                     st.error("Add at least 2 members (comma-separated).")
                 else:
-                    gid = create_group(gname.strip())
+                    gid = create_group(user_id, gname.strip())
                     for m in members: add_member(gid, m)
-                    st.success(f"Group '{gname}' created with {len(members)} members!")
-                    st.rerun()
+                    st.success(f"Group '{gname}' created!"); st.rerun()
 
     if groups.empty:
         st.markdown("""
@@ -94,8 +72,6 @@ def render():
         return
 
     div_label("Your Groups")
-
-    # Group selector
     group_names = groups["name"].tolist()
     group_ids   = groups["id"].tolist()
     sel_name    = st.radio("Select group", group_names, horizontal=True, label_visibility="collapsed")
@@ -103,11 +79,9 @@ def render():
 
     members_df = load_members(sel_gid)
     members    = members_df["name"].tolist() if not members_df.empty else []
-
     if not members:
         st.warning("This group has no members."); return
 
-    # ── Group info bar ────────────────────────────────────────────────────────
     expenses_df = load_split_expenses(sel_gid)
     total_spent = expenses_df["amount"].sum() if not expenses_df.empty else 0
     unsettled   = len(expenses_df[expenses_df["settled"]==0]) if not expenses_df.empty else 0
@@ -134,21 +108,14 @@ def render():
 
     tabs = st.tabs(["💸 Add Expense", "📊 Balances", "📋 All Expenses"])
 
-    # ── Tab 1: Add expense ────────────────────────────────────────────────────
     with tabs[0]:
         with st.form("add_expense_form"):
             c1,c2,c3 = st.columns([2,1,1])
             with c1: desc   = st.text_input("Description", placeholder="Dinner, Hotel, Fuel…")
             with c2: amount = st.number_input("Amount (₹)", min_value=1.0, step=50.0, format="%.2f")
             with c3: paid_by= st.selectbox("Paid by", members)
-            exp_date = st.date_input("Date", value=date.today())
-
-            st.markdown('<p style="font-size:.75rem;font-weight:600;color:#4a5270;'
-                        'text-transform:uppercase;letter-spacing:.05em;margin-top:.5rem;">'
-                        'Split between</p>', unsafe_allow_html=True)
-
+            exp_date   = st.date_input("Date", value=date.today())
             split_type = st.radio("Split type", ["Equal","Custom"], horizontal=True)
-
             shares = {}
             if split_type == "Equal":
                 selected = st.multiselect("Select members", members, default=members)
@@ -162,24 +129,20 @@ def render():
                         shares[m] = st.number_input(m, min_value=0.0,
                                                      value=round(amount/len(members),2),
                                                      step=10.0, format="%.2f", key=f"sh_{m}")
-
             sub2 = st.form_submit_button("💾  Add Expense", use_container_width=True)
-
         if sub2:
             if not desc.strip():
                 st.error("Enter a description.")
             elif abs(sum(shares.values()) - amount) > 0.5:
-                st.error(f"Shares ({inr2(sum(shares.values()))}) must add up to {inr2(amount)}.")
+                st.error(f"Shares must add up to {inr2(amount)}.")
             else:
                 add_split_expense(sel_gid, desc, amount, paid_by, exp_date, shares)
-                st.success(f"Expense '{desc}' of {inr2(amount)} added!"); st.rerun()
+                st.success(f"Expense '{desc}' added!"); st.rerun()
 
-    # ── Tab 2: Balances & settlements ─────────────────────────────────────────
     with tabs[1]:
         balances, settlements = compute_balances(sel_gid)
-
         if not balances:
-            st.info("No unsettled expenses yet."); 
+            st.info("No unsettled expenses yet.")
         else:
             div_label("Net Balances")
             bal_html=""
@@ -194,7 +157,6 @@ def render():
                   </span>
                 </div>"""
             st.markdown(bal_html, unsafe_allow_html=True)
-
             if settlements:
                 div_label("Who Pays Whom")
                 for frm, to, amt in settlements:
@@ -213,7 +175,6 @@ def render():
                       </span>
                     </div>""", unsafe_allow_html=True)
 
-    # ── Tab 3: All expenses ───────────────────────────────────────────────────
     with tabs[2]:
         if expenses_df.empty:
             st.info("No expenses recorded yet.")
@@ -223,8 +184,7 @@ def render():
                 settled   = bool(exp["settled"])
                 status_color = "#00e5a0" if settled else "#ffb547"
                 status_text  = "Settled ✅" if settled else "Pending ⏳"
-                shares_text  = " · ".join([f"{r['member']}: {inr2(r['share'])}"
-                                           for _,r in shares_df.iterrows()])
+                shares_text  = " · ".join([f"{r['member']}: {inr2(r['share'])}" for _,r in shares_df.iterrows()])
                 st.markdown(f"""
                 <div style="background:#111420;border:1px solid rgba(255,255,255,.06);
                             border-radius:12px;padding:1rem 1.2rem;margin-bottom:.6rem;">
@@ -243,12 +203,10 @@ def render():
                   </div>
                   <div style="font-size:.72rem;color:#4a5270;margin-top:.3rem;">{shares_text}</div>
                 </div>""", unsafe_allow_html=True)
-
                 if not settled:
                     if st.button(f"✅ Settle #{exp['id']}", key=f"settle_{exp['id']}"):
                         settle_expense(exp["id"]); st.rerun()
 
-    # ── Delete group ──────────────────────────────────────────────────────────
     with st.expander("⚠️ Delete Group"):
         st.warning("This will permanently delete the group and all its expenses.")
         if st.button("🗑️ Delete Group", type="secondary", key="del_group"):

@@ -1,6 +1,4 @@
-"""
-Savings Goals page — create goals, track progress, AI-predicted completion dates.
-"""
+"""Savings Goals page."""
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
@@ -9,7 +7,6 @@ from utils.db import add_goal, load_goals, update_goal_saved, delete_goal, load_
 from utils.ui import inr, inr2, CHART, div_label, page_hero, GOAL_ICONS
 
 def predict_completion(goal_row, df):
-    """Use average monthly savings to predict when goal will be reached."""
     if df.empty: return None
     df2 = df.copy(); df2["month"] = df2["date"].dt.to_period("M").astype(str)
     monthly = df2.groupby(["month","type"])["amount"].sum().unstack(fill_value=0)
@@ -23,13 +20,12 @@ def predict_completion(goal_row, df):
     completion = date.today() + timedelta(days=int(months_needed*30.5))
     return completion.strftime("%b %Y")
 
-def render():
+def render(user_id):
     page_hero("Savings Goals","Set targets, track progress, and let AI predict your completion date.")
 
-    df_goals = load_goals()
-    df_tx    = load_tx()
+    df_goals = load_goals(user_id)
+    df_tx    = load_tx(user_id)
 
-    # ── Add new goal ──────────────────────────────────────────────────────────
     with st.expander("➕ Create New Goal", expanded=df_goals.empty):
         with st.form("goal_form", clear_on_submit=True):
             c1,c2,c3 = st.columns([2,1,1])
@@ -39,12 +35,10 @@ def render():
             g_icon = st.radio("Icon", GOAL_ICONS, horizontal=True)
             sub = st.form_submit_button("🎯  Create Goal", use_container_width=True)
         if sub:
-            if not g_name.strip():
-                st.error("Please enter a goal name.")
-            elif g_target <= 0:
-                st.error("Target must be greater than ₹0.")
+            if not g_name.strip(): st.error("Please enter a goal name.")
+            elif g_target <= 0:    st.error("Target must be greater than ₹0.")
             else:
-                add_goal(g_name.strip(), g_target, g_deadline, g_icon)
+                add_goal(user_id, g_name.strip(), g_target, g_deadline, g_icon)
                 st.success(f"Goal '{g_name}' created!"); st.rerun()
 
     if df_goals.empty:
@@ -59,30 +53,25 @@ def render():
         return
 
     div_label("Your Goals")
-
-    # ── Summary KPIs ──────────────────────────────────────────────────────────
     total_target = df_goals["target"].sum()
     total_saved  = df_goals["saved"].sum()
     completed    = len(df_goals[df_goals["saved"] >= df_goals["target"]])
 
     st.markdown(f"""
     <div class="kpi-grid">
-      <div class="kpi-card em">
-        <div class="kpi-glow"></div>
+      <div class="kpi-card em"><div class="kpi-glow"></div>
         <span class="kpi-icon">🎯</span>
         <div class="kpi-label">Active Goals</div>
         <div class="kpi-value">{len(df_goals)}</div>
         <span class="kpi-badge nt">{completed} completed</span>
       </div>
-      <div class="kpi-card sa">
-        <div class="kpi-glow"></div>
+      <div class="kpi-card sa"><div class="kpi-glow"></div>
         <span class="kpi-icon">💰</span>
         <div class="kpi-label">Total Saved</div>
         <div class="kpi-value">{inr(total_saved)}</div>
         <span class="kpi-badge up">of {inr(total_target)}</span>
       </div>
-      <div class="kpi-card am">
-        <div class="kpi-glow"></div>
+      <div class="kpi-card am"><div class="kpi-glow"></div>
         <span class="kpi-icon">📈</span>
         <div class="kpi-label">Overall Progress</div>
         <div class="kpi-value">{(total_saved/total_target*100) if total_target else 0:.0f}%</div>
@@ -91,24 +80,18 @@ def render():
     </div>
     """, unsafe_allow_html=True)
 
-    # ── Goal cards ────────────────────────────────────────────────────────────
     for _,g in df_goals.iterrows():
         pct      = min((float(g["saved"])/float(g["target"])*100) if g["target"]>0 else 0, 100)
         done     = float(g["saved"]) >= float(g["target"])
         deadline = datetime.strptime(str(g["deadline"]),"%Y-%m-%d").date() if g["deadline"] else None
         days_left= (deadline - date.today()).days if deadline else None
         eta      = predict_completion(g, df_tx)
-
         fill_col = "#00e5a0" if not done else "#4f8ef7"
         days_str = ""
         if days_left is not None:
-            if days_left < 0:
-                days_str = f'<span style="color:#ff4d6d">Overdue by {-days_left}d</span>'
-            elif days_left <= 30:
-                days_str = f'<span style="color:#ffb547">⚡ {days_left} days left</span>'
-            else:
-                days_str = f'<span style="color:#4a5270">{days_left} days left</span>'
-
+            if days_left < 0:   days_str = f'<span style="color:#ff4d6d">Overdue by {-days_left}d</span>'
+            elif days_left <= 30: days_str = f'<span style="color:#ffb547">⚡ {days_left} days left</span>'
+            else:               days_str = f'<span style="color:#4a5270">{days_left} days left</span>'
         eta_str = f"AI predicts: <b style='color:#a78bfa'>{eta}</b>" if eta else ""
 
         st.markdown(f"""
@@ -140,7 +123,6 @@ def render():
         </div>
         """, unsafe_allow_html=True)
 
-        # Add money + delete controls
         ca, cb, cc = st.columns([2,1,1])
         with ca:
             deposit = st.number_input(f"Add to {g['name']}", min_value=0.0,
@@ -156,11 +138,9 @@ def render():
             if st.button("🗑️ Delete", key=f"del_{g['id']}", type="secondary"):
                 delete_goal(g['id']); st.rerun()
 
-    # ── Progress radar chart ──────────────────────────────────────────────────
     if len(df_goals) >= 2:
         div_label("Goals Overview")
-        pcts = [min(float(r["saved"])/float(r["target"])*100,100) if r["target"]>0 else 0
-                for _,r in df_goals.iterrows()]
+        pcts  = [min(float(r["saved"])/float(r["target"])*100,100) if r["target"]>0 else 0 for _,r in df_goals.iterrows()]
         names = [f"{r['icon']} {r['name']}" for _,r in df_goals.iterrows()]
         fig = go.Figure(go.Scatterpolar(
             r=pcts+[pcts[0]], theta=names+[names[0]],
@@ -169,15 +149,12 @@ def render():
             marker=dict(color='#00e5a0', size=7),
         ))
         fig.update_layout(
-            polar=dict(
-                bgcolor='rgba(0,0,0,0)',
+            polar=dict(bgcolor='rgba(0,0,0,0)',
                 radialaxis=dict(visible=True,range=[0,100],tickfont=dict(color="#4a5270",size=9),
                                 gridcolor="rgba(255,255,255,0.05)"),
                 angularaxis=dict(tickfont=dict(color="#8892b0",size=10),
-                                 gridcolor="rgba(255,255,255,0.05)")
-            ),
+                                 gridcolor="rgba(255,255,255,0.05)")),
             paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-            showlegend=False, height=320,
-            margin=dict(t=20,b=20,l=40,r=40),
+            showlegend=False, height=320, margin=dict(t=20,b=20,l=40,r=40),
         )
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar":False})

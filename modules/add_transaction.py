@@ -4,7 +4,7 @@ from datetime import date
 from utils.db import add_tx, load_tx
 from utils.ui import inr2, CAT_COLOR, EXP_CATS, INC_CATS, div_label, page_hero
 
-def render():
+def render(user_id):
     page_hero("Add Transaction","Record income or expenses to keep your books accurate.")
     col_form, col_recent = st.columns([1.2,1])
 
@@ -21,8 +21,7 @@ def render():
                 tx_type = st.selectbox("Type", ["Expense","Income"])
                 cats    = EXP_CATS if tx_type=="Expense" else INC_CATS
                 tx_cat  = st.selectbox("Category", cats)
-
-            tx_desc = st.text_area("Description", placeholder="Optional note…", height=80)
+            tx_desc   = st.text_area("Description", placeholder="Optional note…", height=80)
             recurring = st.selectbox("Recurring", ["None","Daily","Weekly","Monthly"])
             sub = st.form_submit_button("💾  Save Transaction", use_container_width=True)
 
@@ -30,13 +29,13 @@ def render():
             if tx_amount <= 0:
                 st.error("Amount must be greater than ₹0.")
             else:
-                add_tx(tx_date, tx_amount, tx_cat, tx_type, tx_desc, recurring)
+                add_tx(user_id, tx_date, tx_amount, tx_cat, tx_type, tx_desc, recurring)
                 st.success(f"✅ {tx_type} of {inr2(tx_amount)} ({tx_cat}) saved!")
                 st.balloons()
 
     with col_recent:
         div_label("Recent Entries")
-        df = load_tx()
+        df = load_tx(user_id)
         if df.empty:
             st.info("No transactions yet.")
         else:

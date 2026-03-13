@@ -6,7 +6,7 @@ from datetime import date
 from utils.db import load_budgets, upsert_budget, load_tx
 from utils.ui import inr, EXP_CATS, CHART, chart_card, div_label, page_hero
 
-def render():
+def render(user_id):
     page_hero("Monthly Budget","Set spending limits and track how well you're sticking to them.")
 
     months = pd.period_range(
@@ -14,7 +14,7 @@ def render():
     ).strftime("%Y-%m").tolist()[::-1]
     sel = st.selectbox("Month", months)
 
-    exist = load_budgets(sel)
+    exist = load_budgets(user_id, sel)
     edict = dict(zip(exist["category"], exist["budget"])) if not exist.empty else {}
 
     with st.expander("🎯 Set / Update Budget Limits", expanded=True):
@@ -32,14 +32,14 @@ def render():
             save = st.form_submit_button("💾  Save Budgets", use_container_width=True)
         if save:
             for cat,v in binputs.items():
-                if v > 0: upsert_budget(sel, cat, v)
+                if v > 0: upsert_budget(user_id, sel, cat, v)
             st.success("Budgets updated!"); st.rerun()
 
-    bdf = load_budgets(sel)
+    bdf = load_budgets(user_id, sel)
     if bdf.empty:
         st.info("No budgets set for this month yet."); return
 
-    df = load_tx()
+    df = load_tx(user_id)
     actuals = {}
     if not df.empty:
         df["month"] = df["date"].dt.strftime("%Y-%m")
